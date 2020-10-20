@@ -322,9 +322,16 @@ for i in rg:
                 dl_dict[i] = mi['url']
         except Exception as e:
             format_error(vj,exc=e)
-    
+            
+output=open('dl_list.txt', 'a')
+
 for i in rg:
     print(dl_dict[i], dl_name[i] ,sep=';')
+    dl_data=str(dl_dict[i]) + ' ' + str(dl_name[i]) + '\n'
+    output.write(dl_data)
+
+output.close()
+
 
 
                 
