@@ -56,10 +56,12 @@ parser.add_argument('-v','--version',action='version',
     help='Display version info and exit.')
 parser.add_argument('-U','--url',action='store',
     help='URL of the OpenCast server.')
-parser.add_argument('-u','--username',action='store',
-    help='Username for the OpenCast server.')
-parser.add_argument('-p','--password',action='store',
-    help='Password for the OpenCast server.')
+##parser.add_argument('-u','--username',action='store',
+##    help='Username for the OpenCast server.')
+##parser.add_argument('-p','--password',action='store',
+##    help='Password for the OpenCast server.')
+parser.add_argument('-c','--cookie',action='store',
+    help='JSession Cookie for the Opensaml-Login')
 parser.add_argument('-o','--output-directory',action='store',
     help='Download directory for videos.')
 parser.add_argument('-r','--resolution',action='store',
@@ -113,22 +115,31 @@ if rq.status_code != 200:
     print('Error: the HTTP request returned status code ' +
         str(rq.status_code)+'.')
 
-# ask for username / password if -u / -p are not specified
-un = args.get('username',None)
-if not un:
-    un = input('Username: ')
-pw = args.get('password',None)
-if not pw:
-    pw = getpass.getpass('Password (will not be echoed): ')
+### ask for username / password if -u / -p are not specified
+##un = args.get('username',None)
+##if not un:
+##    un = input('Username: ')
+##pw = args.get('password',None)
+##if not pw:
+##    pw = getpass.getpass('Password (will not be echoed): ')
+##
+### log into OpenCast via a POST request - if we do not log in, the GET request
+### to episodes.json will only return the videos that are visible to the public
+##login_payload={'j_username':un,'j_password':pw,
+##    '_spring_security_remember_me':True}
 
-# log into OpenCast via a POST request - if we do not log in, the GET request
-# to episodes.json will only return the videos that are visible to the public
-login_payload={'j_username':un,'j_password':pw,
-    '_spring_security_remember_me':True}
+# ask for JSession Cookie
+cookie = args.get('cookie',None)
+if not cookie:
+    print('Please input the Value of the JSessionID-Cookie.\n')
+    cookie = input('JSession-Cookie: ')
+
+co = {'JSESSIONID':cookie}
+    
 try:
     ses = requests.session()
-    ses.post(oc_base+'/j_spring_security_check',data=login_payload)
-    el = ses.get(oc_base+'/search/episode.json')
+##    ses.post(oc_base)#+'/j_spring_security_check',data=login_payload)
+    el = ses.get(oc_base+'/search/episode.json?' , cookies = co)
 except Exception as e:
     print('Something went wrong...')
     print('('+str(type(e))+')')
@@ -283,6 +294,13 @@ else:
         print("Could not find matching episodes!")
         exit(1)
 
+# helper function for generating valid file names, taken from
+# https://github.com/django/django/blob/master/django/utils/text.py
+def get_valid_filename(s):
+    import re
+    s = str(s).strip().replace(' ', '_')
+    return re.sub(r'(?u)[^-\w.]', '', s)
+
 # filter media packages for HLS playlists and obtain links for each available
 # choice of resolution, also keeping track of the maximum resolution available
 # for each video; - if -r is not specified, display choice of resolutions for
@@ -291,141 +309,146 @@ else:
 ex_presenter = False
 ex_presentation = False
 rs = args.get('resolution',None)
-hls_dict = {}
+dl_dict = {}
+dl_name = {}
 for i in rg:
     vj = res[sc['videos'][i-1]['downloader_id']]['mediapackage']
     if not rs:
-        print(vj['title'])
-    hls_streams = {}
+        dl_name[i] = get_valid_filename(vj['title'])
+        print(dl_name[i])
     for mi in vj['media']['track']:
         try:
-            if mi['transport'] == 'HLS':
-                md = {}
-                us = mi['url'].split('/')
-                md['hls_base'] = '/'.join(us[:len(us)-1])
-                playlist = requests.get(mi['url']).text.split('\n')
-                max_res = 0
-                rl = []
-                for j in range(len(playlist)):
-                    if 'RESOLUTION' in playlist[j]:
-                        reso = playlist[j].split('RESOLUTION=')[1]
-                        md[reso] = playlist[j+1]
-                        rl += [reso]
-                        height = int(reso.split('x')[1])
-                        if height > max_res:
-                            max_res = height
-                            md['max'] = md[reso]
-                md['resolutions'] = rl
-                hls_streams[mi['type']] = md
-                hls_dict[i] = hls_streams
+            if 'transport' not in mi and mi['mimetype'] == 'video/mp4':
+                dl_dict[i] = mi['url']
         except Exception as e:
             format_error(vj,exc=e)
-    if 'presenter/delivery' in hls_streams.keys():
-        if not rs:
-            print('    Available resolutions for presenter video: ' +
-                ', '.join(hls_streams['presenter/delivery']['resolutions']))
-        ex_presenter = True
-    if 'presentation/delivery' in hls_streams.keys():
-        if not rs:
-            print('    Available resolutions for presentation video: ' +
-                ', '.join(hls_streams['presentation/delivery']['resolutions']))
-        ex_presentation = True
-
-# if any episode provides both presenter and presentation videos and no command
-# line options -pr or -pn are given, ask user to choose; caution: this choice
-# applies to all episodes, no matter if all episodes provide both types of video
-if ex_presenter and ex_presentation:
-    if args.get('presenter',False) or args.get('presentation',False):
-       dl_presenter = args.get('presenter',False)
-       dl_presentation = args.get('presentation',False)
-    else:
-        print('\nDownload [1] presenter videos, [2] presentation videos or ' +
-            '[3] both?')
-        while True:
-            ch_str = input('\nPlease input 1, 2 or 3: ')
-            try:
-                ch = int(ch_str)
-                if ch not in [1,2,3]:
-                    raise Exception()
-                print('')
-                break
-            except:
-                print('\nPlease enter a valid number between 1 and 3!')
-        dl_presenter = ch%2 == 1
-        dl_presentation = ch//2 == 1
-
-# if -r is not specified, ask user to choose the resolution
-if not rs:
-    print('Please enter the resolution to download for each video.')
-    print('Note: this will only download videos available in the specified ' +
-        'resolution.')
-    print('To download the highest resolution for each video, enter "max".\n')
-    rs = input('Download resolution: ')
-
-# if -d is not specified, ask user where to save the video files
-if not dir_str:
-    print('\nPlease specify where to save the downloaded files.')
-    while True:
-        dir_str = input('\nInput a valid directory or leave blank to save to ' +
-            'the working directory: ')
-        dir_str = os.path.expanduser(dir_str) # ~/dir -> /home/username/dir
-        try:
-            if not os.path.isdir(dir_str if dir_str != '' else '.'):
-                raise Exception()
-            break
-        except:
-            pass
-
-# helper function for generating valid file names, taken from
-# https://github.com/django/django/blob/master/django/utils/text.py
-def get_valid_filename(s):
-    import re
-    s = str(s).strip().replace(' ', '_')
-    return re.sub(r'(?u)[^-\w.]', '', s)
-
-# helper function for downloading either type of video; explanation: for a given
-# resolution, the file name in the HLS playlist leads to a list of MPEG-TS chunk
-# file names - those are downloaded and concatenated into one MPEG-TS file
-def download(i,is_presenter,dl_presenter,dl_presentation,reso):
-    vj = res[sc['videos'][i-1]['downloader_id']]['mediapackage']
-    pstr = 'presenter' if is_presenter else 'presentation'
-    vh = hls_dict[i].get(pstr+'/delivery',None)
-    if not vh:
-        return
-    cl_file = vh.get(reso,None)
-    if not cl_file:
-        return
-    cl_url = vh['hls_base']+'/'+cl_file
-    dlstr = '\nDownloading "%s"' % vj['title']
-    fname = os.path.join(dir_str,get_valid_filename(vj['title']))
-    if dl_presenter and dl_presentation:
-        if 'presenter/delivery' in hls_dict[i].keys() and \
-            'presentation/delivery' in hls_dict[i].keys():
-            dlstr += ' ('+pstr+')'
-            fname += '_'+pstr
-    print(dlstr)
-    fname += '.ts'
-    cl = [l for l in requests.get(cl_url).text.split('\n') if l.endswith('.ts')]
-    dlfile = open(fname,'wb')
-    # progress bar (this does not monitor network activity, but rather the ratio
-    # of the count of downloaded chunks and the length of the chunk list)
-    width = 80
-    fmt = '\r[%-'+str(width-7)+'s] %3d%%'
-    for i in range(len(cl)):
-        dlfile.write(requests.get(vh['hls_base']+'/'+cl[i],stream=True
-            ).raw.read())
-        print(fmt % ((((width-7)*(i+1))//len(cl))*'=',(100*(i+1))//len(cl)), \
-            end='')
-    dlfile.close()
-    print()
-
-# download the videos as specified
-if not ex_presentation:
-    dl_presenter,dl_presentation = True,False
-if not ex_presenter:
-    dl_presenter,dl_presentation = False,True
+    
 for i in rg:
-    if dl_presenter:
-        download(i,True,dl_presenter,dl_presentation,rs)
-    if dl_presentation:
-        download(i,False,dl_presenter,dl_presentation,rs)
+    print(dl_dict[i], dl_name[i] ,sep=';')
+
+
+                
+##            elif mi["transport"] == 'HLS':
+##                md = {}
+##                us = mi['url'].split('/')
+##                md['hls_base'] = '/'.join(us[:len(us)-1])
+##                playlist = requests.get(mi['url']).text.split('\n')
+##                max_res = 0
+##                rl = []
+##                for j in range(len(playlist)):
+##                    if 'RESOLUTION' in playlist[j]:
+##                        reso = playlist[j].split('RESOLUTION=')[1]
+##                        md[reso] = playlist[j+1]
+##                        rl += [reso]
+##                        height = int(reso.split('x')[1])
+##                        if height > max_res:
+##                            max_res = height
+##                            md['max'] = md[reso]
+##                md['resolutions'] = rl
+##                hls_streams[mi['type']] = md
+##                hls_dict[i] = hls_streams
+##        except Exception as e:
+##            format_error(vj,exc=e)
+##    if 'presenter/delivery' in hls_streams.keys():
+##        if not rs:
+##            print('    Available resolutions for presenter video: ' +
+##                ', '.join(hls_streams['presenter/delivery']['resolutions']))
+##        ex_presenter = True
+##    if 'presentation/delivery' in hls_streams.keys():
+##        if not rs:
+##            print('    Available resolutions for presentation video: ' +
+##                ', '.join(hls_streams['presentation/delivery']['resolutions']))
+##        ex_presentation = True
+##
+### if any episode provides both presenter and presentation videos and no command
+### line options -pr or -pn are given, ask user to choose; caution: this choice
+### applies to all episodes, no matter if all episodes provide both types of video
+##if ex_presenter and ex_presentation:
+##    if args.get('presenter',False) or args.get('presentation',False):
+##       dl_presenter = args.get('presenter',False)
+##       dl_presentation = args.get('presentation',False)
+##    else:
+##        print('\nDownload [1] presenter videos, [2] presentation videos or ' +
+##            '[3] both?')
+##        while True:
+##            ch_str = input('\nPlease input 1, 2 or 3: ')
+##            try:
+##                ch = int(ch_str)
+##                if ch not in [1,2,3]:
+##                    raise Exception()
+##                print('')
+##                break
+##            except:
+##                print('\nPlease enter a valid number between 1 and 3!')
+##        dl_presenter = ch%2 == 1
+##        dl_presentation = ch//2 == 1
+##
+### if -r is not specified, ask user to choose the resolution
+##if not rs:
+##    print('Please enter the resolution to download for each video.')
+##    print('Note: this will only download videos available in the specified ' +
+##        'resolution.')
+##    print('To download the highest resolution for each video, enter "max".\n')
+##    rs = input('Download resolution: ')
+##
+### if -d is not specified, ask user where to save the video files
+##if not dir_str:
+##    print('\nPlease specify where to save the downloaded files.')
+##    while True:
+##        dir_str = input('\nInput a valid directory or leave blank to save to ' +
+##            'the working directory: ')
+##        dir_str = os.path.expanduser(dir_str) # ~/dir -> /home/username/dir
+##        try:
+##            if not os.path.isdir(dir_str if dir_str != '' else '.'):
+##                raise Exception()
+##            break
+##        except:
+##            pass
+##
+##
+### helper function for downloading either type of video; explanation: for a given
+### resolution, the file name in the HLS playlist leads to a list of MPEG-TS chunk
+### file names - those are downloaded and concatenated into one MPEG-TS file
+##def download(i,is_presenter,dl_presenter,dl_presentation,reso):
+##    vj = res[sc['videos'][i-1]['downloader_id']]['mediapackage']
+##    pstr = 'presenter' if is_presenter else 'presentation'
+##    vh = hls_dict[i].get(pstr+'/delivery',None)
+##    if not vh:
+##        return
+##    cl_file = vh.get(reso,None)
+##    if not cl_file:
+##        return
+##    cl_url = vh['hls_base']+'/'+cl_file
+##    dlstr = '\nDownloading "%s"' % vj['title']
+##    fname = os.path.join(dir_str,get_valid_filename(vj['title']))
+##    if dl_presenter and dl_presentation:
+##        if 'presenter/delivery' in hls_dict[i].keys() and \
+##            'presentation/delivery' in hls_dict[i].keys():
+##            dlstr += ' ('+pstr+')'
+##            fname += '_'+pstr
+##    print(dlstr)
+##    fname += '.ts'
+##    cl = [l for l in requests.get(cl_url).text.split('\n') if l.endswith('.ts')]
+##    dlfile = open(fname,'wb')
+##    # progress bar (this does not monitor network activity, but rather the ratio
+##    # of the count of downloaded chunks and the length of the chunk list)
+##    width = 80
+##    fmt = '\r[%-'+str(width-7)+'s] %3d%%'
+##    for i in range(len(cl)):
+##        dlfile.write(requests.get(vh['hls_base']+'/'+cl[i],stream=True
+##            ).raw.read())
+##        print(fmt % ((((width-7)*(i+1))//len(cl))*'=',(100*(i+1))//len(cl)), \
+##            end='')
+##    dlfile.close()
+##    print()
+##
+### download the videos as specified
+##if not ex_presentation:
+##    dl_presenter,dl_presentation = True,False
+##if not ex_presenter:
+##    dl_presenter,dl_presentation = False,True
+##for i in rg:
+##    if dl_presenter:
+##        download(i,True,dl_presenter,dl_presentation,rs)
+##    if dl_presentation:
+##        download(i,False,dl_presenter,dl_presentation,rs)
