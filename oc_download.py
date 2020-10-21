@@ -327,7 +327,7 @@ output=open('dl_list.txt', 'a')
 
 for i in rg:
     print(dl_dict[i], dl_name[i] ,sep=';')
-    dl_data=str(dl_dict[i]) + ' ' + str(dl_name[i]) + '\n'
+    dl_data=str(dl_dict[i]) + ' ' + str(dl_name[i]) + '.mp4\n'
     output.write(dl_data)
 
 output.close()
