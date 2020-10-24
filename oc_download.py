@@ -310,24 +310,27 @@ ex_presenter = False
 ex_presentation = False
 rs = args.get('resolution',None)
 dl_dict = {}
-dl_name = {}
+dl_name = ''
 for i in rg:
     vj = res[sc['videos'][i-1]['downloader_id']]['mediapackage']
     if not rs:
-        dl_name[i] = get_valid_filename(vj['title'])
-        print(dl_name[i])
-    for mi in vj['media']['track']:
-        try:
-            if 'transport' not in mi and mi['mimetype'] == 'video/mp4':
-                dl_dict[i] = mi['url']
-        except Exception as e:
-            format_error(vj,exc=e)
+        dl_title = get_valid_filename(vj['title'])
+        for mi in vj['media']['track']:
+            try:
+                if 'transport' not in mi and mi['mimetype'] == 'video/mp4' and mi['type'] == 'presenter/delivery':
+                    dl_name = dl_title + '_Vortragender'
+                    dl_dict[dl_name] = mi['url']
+                elif 'transport' not in mi and mi['mimetype'] == 'video/mp4' and mi['type'] == 'presentation/delivery':
+                    dl_name = dl_title + '_Praesentation'
+                    dl_dict[dl_name] = mi['url']
+            except Exception as e:
+                format_error(vj,exc=e)
             
 output=open('dl_list.txt', 'a')
 
-for i in rg:
-    print(dl_dict[i], dl_name[i] ,sep=';')
-    dl_data=str(dl_dict[i]) + ' ' + str(dl_name[i]) + '.mp4\n'
+for i in dl_dict:
+    print(dl_dict[i], i ,sep=';')
+    dl_data=str(dl_dict[i]) + ' ' + str(i) + '.mp4\n'
     output.write(dl_data)
 
 output.close()

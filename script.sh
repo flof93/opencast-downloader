@@ -1,6 +1,6 @@
-!#/bin/sh
+!#/bin/bash
 
-python oc_download.py
+python3 oc_download.py
 
 err=0
 while read -r url;filename tail; do
