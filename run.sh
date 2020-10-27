@@ -27,10 +27,13 @@ then
 	fi
 fi
 
-python3 oc_download.py -U 'https://oc-presentation.ltcc.tuwien.ac.at'
+read -p 'Soll jetzt eine neue Hilfsdatei dl_list.txt erstellt werden? [y/n] ' run_scr
+if [ $run_scr == 'y' ]
+then
+	python3 oc_download.py -U 'https://oc-presentation.ltcc.tuwien.ac.at'
+fi
 
 read -p 'Soll der Download jetzt gestartet werden? [y/n] ' run_dl
-
 if [ $run_dl == 'y' ]
 then
 	err=0
